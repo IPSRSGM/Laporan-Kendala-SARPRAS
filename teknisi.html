@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Teknisi RSGM</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+:root{
+  --primary:#6366f1;
+  --secondary:#22d3ee;
+  --bg:#eef2ff;
+  --card:#ffffff;
+  --text:#0f172a;
+}
+body{
+  margin:0;
+  font-family:Poppins,sans-serif;
+  background:linear-gradient(135deg,#eef2ff,#f8fafc);
+  padding:24px;
+  color:var(--text)
+}
+.container{max-width:1200px;margin:auto}
+.header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:24px
+}
+button{
+  background:linear-gradient(135deg,var(--primary),var(--secondary));
+  color:#fff;
+  border:none;
+  padding:12px 18px;
+  border-radius:14px;
+  font-weight:600;
+  cursor:pointer
+}
+.card{
+  background:#fff;
+  border-radius:22px;
+  padding:22px;
+  margin-bottom:24px;
+  box-shadow:0 20px 40px rgba(0,0,0,.08)
+}
+.grid{
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:20px
+}
+@media(max-width:800px){
+  .grid{grid-template-columns:1fr}
+}
+table{
+  width:100%;
+  border-collapse:collapse
+}
+th,td{
+  padding:12px;
+  border-bottom:1px solid #e5e7eb;
+  font-size:14px
+}
+select,textarea{
+  width:100%;
+  padding:8px;
+  border-radius:10px;
+  border:1px solid #ddd;
+  font-family:Poppins
+}
+.status{
+  font-size:12px;
+  padding:6px 14px;
+  border-radius:999px;
+  display:inline-block
+}
+.pending{background:#fef3c7;color:#92400e}
+.proses{background:#dbeafe;color:#1e40af}
+.selesai{background:#dcfce7;color:#166534}
+.rusak{background:#fee2e2;color:#991b1b}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<div class="header">
+<h1>🛠️ Dashboard Teknisi</h1>
+<button onclick="downloadCSV()">⬇️ Unduh </button>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h3>📊 Statistik Status</h3>
+    <canvas id="chartStatus"></canvas>
+  </div>
+
+  <div class="card">
+    <h3>📈 Ringkasan</h3>
+    <ul id="summary"></ul>
+  </div>
+</div>
+
+<div class="card">
+<h3>📋 Data Laporan User</h3>
+<table>
+<thead>
+<tr>
+<th>Nama</th>
+<th>Ruangan</th>
+<th>Masalah</th>
+<th>Status</th>
+<th>Ubah Status</th>
+<th>Catatan</th>
+</tr>
+</thead>
+<tbody id="listTeknisi"></tbody>
+</table>
+</div>
+
+</div>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getFirestore,
+  collection,
+  onSnapshot,
+  updateDoc,
+  doc,
+  serverTimestamp,
+  query,
+  orderBy
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+/* 🔥 PASTI SAMA DENGAN USER */
+const firebaseConfig = {
+  apiKey: "AIzaSyBhwT6Z8Hd2KWU-rfbSs5pOv4Yf25Uitzk",
+  authDomain: "laporan-kendala-rsgm-b42ce.firebaseapp.com",
+  projectId: "laporan-kendala-rsgm-b42ce",
+  storageBucket: "laporan-kendala-rsgm-b42ce.firebasestorage.app",
+  messagingSenderId: "173817207344",
+  appId: "1:173817207344:web:345967805ac4d2906b6bf5"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
+let cache=[];
+let chart;
+
+/* 🔥 QUERY REALTIME + URUT WAKTU */
+const q = query(
+  collection(db,"laporan"),
+  orderBy("waktu","desc")
+);
+
+onSnapshot(q,(snap)=>{
+  listTeknisi.innerHTML="";
+  cache=[];
+  let stat={pending:0,proses:0,selesai:0,rusak:0};
+
+  snap.forEach(d=>{
+    const x=d.data();
+    cache.push({...x,id:d.id});
+    stat[x.status] = (stat[x.status]||0)+1;
+
+    listTeknisi.innerHTML+=`
+    <tr>
+      <td>${x.nama}</td>
+      <td>${x.ruangan}</td>
+      <td>${x.masalah}</td>
+      <td><span class="status ${x.status}">${x.status}</span></td>
+      <td>
+        <select onchange="updateStatus('${d.id}',this.value)">
+          <option value="pending" ${x.status==='pending'?'selected':''}>pending</option>
+          <option value="proses" ${x.status==='proses'?'selected':''}>proses</option>
+          <option value="selesai" ${x.status==='selesai'?'selected':''}>selesai</option>
+          <option value="rusak" ${x.status==='rusak'?'selected':''}>rusak</option>
+        </select>
+      </td>
+      <td>
+        <textarea onchange="updateNote('${d.id}',this.value)">${x.catatan||''}</textarea>
+      </td>
+    </tr>`;
+  });
+
+  renderChart(stat);
+  summary.innerHTML=`
+    <li>Total: <b>${cache.length}</b></li>
+    <li>Pending: ${stat.pending}</li>
+    <li>Proses: ${stat.proses}</li>
+    <li>Selesai: ${stat.selesai}</li>
+    <li>Rusak: ${stat.rusak}</li>`;
+});
+
+function renderChart(stat){
+  if(chart) chart.destroy();
+  chart = new Chart(chartStatus,{
+    type:"doughnut",
+    data:{
+      labels:["Pending","Proses","Selesai","Rusak"],
+      datasets:[{
+        data:[
+          stat.pending,
+          stat.proses,
+          stat.selesai,
+          stat.rusak
+        ]
+      }]
+    }
+  });
+}
+
+window.updateStatus = async(id,val)=>{
+  await updateDoc(doc(db,"laporan",id),{
+    status:val,
+    updateTeknisi:serverTimestamp()
+  });
+}
+
+window.updateNote = async(id,val)=>{
+  await updateDoc(doc(db,"laporan",id),{
+    catatan:val,
+    updateTeknisi:serverTimestamp()
+  });
+}
+
+window.downloadCSV = ()=>{
+  const data = [];
+
+  // Header
+  data.push([
+    "Nama",
+    "Ruangan",
+    "Masalah",
+    "Status",
+    "Catatan Teknisi",
+    "Tanggal Laporan"
+  ]);
+
+  // Isi data
+  cache.forEach(x=>{
+    data.push([
+      x.nama || "",
+      x.ruangan || "",
+      x.masalah || "",
+      x.status || "",
+      x.catatan || "",
+      x.waktu?.toDate
+        ? x.waktu.toDate().toLocaleString("id-ID")
+        : ""
+    ]);
+  });
+
+  // Buat worksheet & workbook
+  const ws = XLSX.utils.aoa_to_sheet(data);
+
+  // Lebar kolom biar rapi
+  ws['!cols'] = [
+    { wch: 20 }, // Nama
+    { wch: 18 }, // Ruangan
+    { wch: 40 }, // Masalah
+    { wch: 15 }, // Status
+    { wch: 30 }, // Catatan
+    { wch: 22 }  // Tanggal
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Laporan Teknisi");
+
+  // Download file
+  XLSX.writeFile(wb, "Laporan_Teknisi_RSGM.xlsx");
+};
+
+
+</script>
+</body>
+</html>
